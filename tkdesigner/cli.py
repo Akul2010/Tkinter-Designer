@@ -3,8 +3,8 @@ TKinter Designer command-line interface.
 """
 
 from tkdesigner.designer import Designer
+from tkdesigner.utils import parse_figma_url
 
-import re
 import os
 import logging
 import argparse
@@ -34,24 +34,40 @@ def main():
         help=(
             "If this flag is passed in, the output directory given "
             "will be overwritten if it exists."))
+    parser.add_argument(
+        "-t", "--template", choices=("script", "class", "pages"), default="script",
+        help=(
+            "Generated code style. Use `class` for a class-based Tkinter app "
+            "or `pages` for one app with frame-to-frame navigation. "
+            "Defaults to script."))
+    parser.add_argument(
+        "--theme", type=str, default="",
+        help=(
+            "Optional ttk theme name to apply in generated apps, such as "
+            "`clam`, `alt`, or `default`."))
 
     parser.add_argument(
         "file_url", type=str, help="File url of the Figma design.")
-    parser.add_argument("token", type=str, help="Figma token.")
+    parser.add_argument(
+        "token", type=str, nargs="?",
+        help=(
+            "Figma token. Can also be provided with the FIGMA_TOKEN "
+            "environment variable."))
 
     args = parser.parse_args()
 
     logging.basicConfig()
     logging.info(f"args: {args}")
 
-    match = re.search(
-        r'https://www.figma.com/(file|design)/([0-9A-Za-z]+)', args.file_url.split("?")[0])
-    if match is None:
-        raise ValueError("Invalid file URL.")
+    figma_reference = parse_figma_url(args.file_url)
 
-    file_key = match.group(2).strip()
-    token = args.token.strip()
+    token = (args.token or os.getenv("FIGMA_TOKEN", "")).strip()
+    if not token:
+        parser.error(
+            "missing Figma token. If your Figma URL contains `?` or `&`, "
+            "wrap the URL in quotes so your shell does not split it.")
     output_path = Path(args.output.strip()).expanduser().resolve() / "build"
+    clean_output = args.force
 
     if output_path.exists() and not output_path.is_dir():
         raise RuntimeError(
@@ -65,9 +81,17 @@ def main():
             if response.lower().strip() != "y":
                 print("Aborting!")
                 exit(-1)
+            clean_output = True
 
-    designer = Designer(token, file_key, output_path)
-    designer.design()
+    designer = Designer(
+        token,
+        figma_reference.file_key,
+        output_path,
+        node_id=figma_reference.node_id,
+        template_style=args.template,
+        theme=args.theme.strip(),
+    )
+    designer.design(clean=clean_output)
     print(f"\nProject successfully generated at {output_path}.\n")
 
 
